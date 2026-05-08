@@ -18,6 +18,7 @@ unset target_repo
 unset project_number
 unset project_url
 unset issue_node_id
+unset project_item_id
 unset CONDUCTOR_PERSONA
 unset CONDUCTOR_LAST_COMMENT_URL
 
