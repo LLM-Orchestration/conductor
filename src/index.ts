@@ -406,11 +406,11 @@ export function selectGeminiCliModel(
 			(model) => bucket.modelId && modelBucketMatches(model, bucket.modelId),
 		),
 	);
-	const allModelsHaveQuota =
-		models.every((model) => available.get(model)) &&
-		recognizedBuckets.length > 0 &&
-		recognizedBuckets.every(bucketHasQuota);
-	if (allModelsHaveQuota) return "auto";
+
+	// Prefer pro if it has enough quota (for all tasks/roles)
+	if (available.get("pro")) {
+		return "pro";
+	}
 
 	const preference: Exclude<GeminiCliModel, "auto">[] =
 		persona === "coder"
