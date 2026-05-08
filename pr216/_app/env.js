@@ -1,0 +1,1 @@
+export const env={"PUBLIC_BASE_PATH":"/conductor/pr216","PUBLIC_GITHUB_CLIENT_ID":"Ov23liCCY3J3owcpN8iX","PUBLIC_OAUTH_EXCHANGE_URL":"https://us-central1-llm-orch-conductor-bridge.cloudfunctions.net/githubOAuthExchange"}
