@@ -31,22 +31,32 @@ describe("buildGeminiCliArgs", () => {
 });
 
 describe("selectGeminiCliModel", () => {
-	it("allows auto when all model families have quota remaining", () => {
+	it("prefers pro when all model families have quota remaining", () => {
 		expect(
 			selectGeminiCliModel("coder", [
 				{ modelId: "gemini-2.5-flash", remainingFraction: 0.1 },
 				{ modelId: "gemini-2.5-flash-lite", remainingFraction: 0.1 },
 				{ modelId: "gemini-2.5-pro", remainingFraction: 0.1 },
 			]),
-		).toBe("auto");
+		).toBe("pro");
 	});
 
-	it("prefers flash for conductor when auto is unsafe", () => {
+	it("prefers pro for conductor when available", () => {
 		expect(
 			selectGeminiCliModel("conductor", [
 				{ modelId: "gemini-2.5-flash", remainingFraction: 0.1 },
 				{ modelId: "gemini-2.5-flash-lite", remainingFraction: 0 },
 				{ modelId: "gemini-2.5-pro", remainingFraction: 0.1 },
+			]),
+		).toBe("pro");
+	});
+
+	it("prefers flash for conductor when pro is exhausted", () => {
+		expect(
+			selectGeminiCliModel("conductor", [
+				{ modelId: "gemini-2.5-flash", remainingFraction: 0.1 },
+				{ modelId: "gemini-2.5-flash-lite", remainingFraction: 0.1 },
+				{ modelId: "gemini-2.5-pro", remainingFraction: 0 },
 			]),
 		).toBe("flash");
 	});
@@ -62,11 +72,11 @@ describe("selectGeminiCliModel", () => {
 		).toBe("pro");
 	});
 
-	it("prefers pro for coder when auto is unsafe", () => {
+	it("prefers pro for coder when flash is exhausted", () => {
 		expect(
 			selectGeminiCliModel("coder", [
-				{ modelId: "gemini-2.5-flash", remainingFraction: 0.1 },
-				{ modelId: "gemini-2.5-flash-lite", remainingFraction: 0 },
+				{ modelId: "gemini-2.5-flash", remainingFraction: 0 },
+				{ modelId: "gemini-2.5-flash-lite", remainingFraction: 0.1 },
 				{ modelId: "gemini-2.5-pro", remainingFraction: 0.1 },
 			]),
 		).toBe("pro");
