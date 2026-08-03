@@ -93,6 +93,8 @@ ${failureDetails}
 export const DEFAULT_CODEX_MODEL = "gpt-5.6-sol";
 export const DEFAULT_CODEX_EFFORT = "xhigh";
 
+export type CodexAuthMode = "api-proxy" | "subscription";
+
 export type CodexReasoningEffort =
 	| "none"
 	| "low"
@@ -109,6 +111,8 @@ const CodexReasoningEffortSchema = z.enum([
 	"xhigh",
 	"max",
 ]);
+
+const CodexAuthModeSchema = z.enum(["api-proxy", "subscription"]);
 
 function buildCodexEnv(): NodeJS.ProcessEnv {
 	const forwardedKeys = [
@@ -159,26 +163,37 @@ export function resolveCodexReasoningEffort(
 	return parsed.success ? parsed.data : DEFAULT_CODEX_EFFORT;
 }
 
+export function resolveCodexAuthMode(
+	value = process.env.CONDUCTOR_CODEX_AUTH_MODE,
+): CodexAuthMode {
+	const parsed = CodexAuthModeSchema.safeParse(value);
+	return parsed.success ? parsed.data : "api-proxy";
+}
+
 export function buildCodexCliArgs(
 	prompt: string,
 	model = process.env.CONDUCTOR_CODEX_MODEL || DEFAULT_CODEX_MODEL,
 	effort = resolveCodexReasoningEffort(),
+	authMode = resolveCodexAuthMode(),
 ): string[] {
-	return [
-		"--ask-for-approval",
-		"never",
-		"exec",
-		"--json",
+	const args = ["--ask-for-approval", "never", "exec", "--json"];
+
+	if (authMode === "subscription") {
+		args.push("--strict-config", "--ephemeral");
+	} else {
+		args.push("--sandbox", "danger-full-access");
+	}
+
+	args.push(
 		"--model",
 		model,
-		"--sandbox",
-		"danger-full-access",
 		"--color",
 		"never",
 		"--config",
 		`model_reasoning_effort=${JSON.stringify(effort)}`,
 		prompt,
-	];
+	);
+	return args;
 }
 
 const CommentSchema = z.object({
@@ -649,8 +664,9 @@ ENVIRONMENT:
 			const codexModel =
 				process.env.CONDUCTOR_CODEX_MODEL || DEFAULT_CODEX_MODEL;
 			const codexEffort = resolveCodexReasoningEffort();
+			const codexAuthMode = resolveCodexAuthMode();
 			logger.info(
-				`Invoking Codex CLI with model '${codexModel}' and effort '${codexEffort}'...`,
+				`Invoking Codex CLI with model '${codexModel}', effort '${codexEffort}', and auth mode '${codexAuthMode}'...`,
 			);
 			const childEnv = buildCodexEnv();
 			childEnv.CONDUCTOR_PERSONA = persona;
@@ -664,7 +680,12 @@ ENVIRONMENT:
 				path.resolve(process.cwd(), "..");
 			childEnv.CONDUCTOR_TARGET_DIR = targetCwd;
 
-			const args = buildCodexCliArgs(prompt, codexModel, codexEffort);
+			const args = buildCodexCliArgs(
+				prompt,
+				codexModel,
+				codexEffort,
+				codexAuthMode,
+			);
 
 			const result = await runStreamingCommand(
 				"codex",

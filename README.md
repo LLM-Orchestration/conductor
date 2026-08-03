@@ -27,6 +27,8 @@ Conductor invokes Codex CLI non-interactively with `codex exec --json`. The JSON
 
 The workflow pins Codex CLI `0.146.0`. Upgrade that version deliberately alongside invocation and JSONL fixture tests. Historical `GEMINI_EVENT` records remain renderable in the observability UI so old workflow runs do not disappear.
 
+For personal repositories, [Parallel Codex Subscription Workers](SUBSCRIPTION_WORKERS.md) describes an opt-in private credential repository that runs multiple GitHub-hosted Codex CLI jobs against the owner's ChatGPT subscription. Subscription workers use an isolated permission profile and never use `danger-full-access`.
+
 ## Projects V2 Setup
 
 The live shared board is the organization-owned project at:

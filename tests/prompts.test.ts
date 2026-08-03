@@ -7,6 +7,7 @@ import {
 	DEFAULT_CODEX_EFFORT,
 	DEFAULT_CODEX_MODEL,
 	loadPrompts,
+	resolveCodexAuthMode,
 	resolveCodexReasoningEffort,
 } from "../src/index";
 
@@ -17,10 +18,10 @@ describe("buildCodexCliArgs", () => {
 			"never",
 			"exec",
 			"--json",
-			"--model",
-			DEFAULT_CODEX_MODEL,
 			"--sandbox",
 			"danger-full-access",
+			"--model",
+			DEFAULT_CODEX_MODEL,
 			"--color",
 			"never",
 			"--config",
@@ -36,6 +37,27 @@ describe("buildCodexCliArgs", () => {
 		expect(buildCodexCliArgs("test prompt", "custom-model", "high")).toContain(
 			'model_reasoning_effort="high"',
 		);
+	});
+
+	it("uses strict permission-profile configuration for subscription auth", () => {
+		const args = buildCodexCliArgs(
+			"test prompt",
+			DEFAULT_CODEX_MODEL,
+			"high",
+			"subscription",
+		);
+
+		expect(args).toContain("--strict-config");
+		expect(args).toContain("--ephemeral");
+		expect(args).not.toContain("--sandbox");
+		expect(args).not.toContain("danger-full-access");
+	});
+});
+
+describe("resolveCodexAuthMode", () => {
+	it("selects subscription mode explicitly and otherwise fails back safely", () => {
+		expect(resolveCodexAuthMode("subscription")).toBe("subscription");
+		expect(resolveCodexAuthMode("unexpected")).toBe("api-proxy");
 	});
 });
 
@@ -67,10 +89,37 @@ describe("Conductor workflow", () => {
 	});
 
 	it("configures the Codex model without Gemini credentials", () => {
+		expect(workflow).toContain("CONDUCTOR_CODEX_AUTH_MODE: api-proxy");
 		expect(workflow).toContain("CONDUCTOR_CODEX_MODEL:");
 		expect(workflow).toContain("CONDUCTOR_CODEX_EFFORT:");
 		expect(workflow).not.toContain("GEMINI_API_KEY");
 		expect(workflow).not.toContain("GEMINI_OAUTH_CREDENTIALS");
+	});
+});
+
+describe("subscription worker template", () => {
+	const workflow = fs.readFileSync(
+		path.join(
+			process.cwd(),
+			"templates",
+			"subscription-worker",
+			"conductor-subscription.yml",
+		),
+		"utf8",
+	);
+
+	it("runs two subscription workers in parallel without a concurrency lock", () => {
+		expect(workflow).toContain("worker: [1, 2]");
+		expect(workflow).not.toContain("concurrency:");
+		expect(workflow).toContain("CODEX_AUTH_JSON:");
+	});
+
+	it("tests credential denial and avoids danger-full-access", () => {
+		expect(workflow).toContain(
+			"Verify agent commands cannot read subscription auth",
+		);
+		expect(workflow).toContain("--permission-profile conductor-worker");
+		expect(workflow).not.toContain("danger-full-access");
 	});
 });
 

@@ -6,6 +6,9 @@
 	"scripts": {
 		"build": "tsc",
 		"check": "npm run build",
+		"codex:subscription:prepare": "node dist/codex-subscription-auth.js prepare",
+		"codex:subscription:refresh": "node dist/codex-subscription-auth.js refresh",
+		"codex:subscription:enroll": "bash ./scripts/enroll-subscription-worker.sh",
 		"firebase:deploy": "npx --yes firebase-tools deploy --only functions",
 		"firebase:serve": "npx --yes firebase-tools emulators:start --only functions",
 		"functions:check": "node -c functions/index.js && tsc -p functions/tsconfig.json",

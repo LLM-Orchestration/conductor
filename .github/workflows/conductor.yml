@@ -90,6 +90,7 @@ jobs:
           CONDUCTOR_TOKEN: ${{ secrets.CONDUCTOR_TOKEN }}
           GH_TOKEN: ${{ secrets.CONDUCTOR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.CONDUCTOR_TOKEN }}
+          CONDUCTOR_CODEX_AUTH_MODE: api-proxy
           CONDUCTOR_CODEX_MODEL: ${{ vars.CONDUCTOR_CODEX_MODEL || 'gpt-5.6-sol' }}
           CONDUCTOR_CODEX_EFFORT: ${{ vars.CONDUCTOR_CODEX_EFFORT || 'xhigh' }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}

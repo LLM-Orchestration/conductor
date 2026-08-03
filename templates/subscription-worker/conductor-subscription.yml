@@ -1,0 +1,192 @@
+name: Conductor Subscription Worker
+
+run-name: "Subscription worker ${{ github.event.client_payload.repository || 'parallel smoke' }}${{ github.event.client_payload.issue_number && format(' #{0}', github.event.client_payload.issue_number) || '' }}"
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [project_in_progress]
+
+permissions:
+  contents: read
+
+env:
+  CODEX_VERSION: "0.146.0"
+  CONDUCTOR_REPOSITORY: LLM-Orchestration/conductor
+
+jobs:
+  parallel-subscription-smoke:
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: [1, 2]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Conductor
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONDUCTOR_REPOSITORY }}
+          ref: ${{ vars.CONDUCTOR_REF || 'main' }}
+          persist-credentials: false
+          path: conductor
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: conductor/package-lock.json
+
+      - name: Build Conductor
+        working-directory: conductor
+        run: npm ci && npm run build
+
+      - name: Install pinned Codex CLI
+        run: npm install --global "@openai/codex@$CODEX_VERSION"
+
+      - name: Prepare isolated subscription auth
+        working-directory: conductor
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: npm run codex:subscription:prepare
+
+      - name: Verify agent commands cannot read subscription auth
+        working-directory: conductor
+        run: |
+          if codex sandbox --permission-profile conductor-worker --cd "$PWD" -- sh -c "cat '$CODEX_HOME/auth.json'" >/dev/null 2>&1; then
+            echo "Subscription auth was readable inside the agent sandbox." >&2
+            exit 1
+          fi
+          echo "Subscription auth is denied inside the agent sandbox."
+
+      - name: Run subscription-backed Codex smoke
+        working-directory: conductor
+        env:
+          WORKER_NUMBER: ${{ matrix.worker }}
+          CONDUCTOR_CODEX_MODEL: ${{ vars.CONDUCTOR_CODEX_MODEL || 'gpt-5.6-sol' }}
+        run: |
+          codex --ask-for-approval never exec \
+            --json \
+            --strict-config \
+            --ephemeral \
+            --model "$CONDUCTOR_CODEX_MODEL" \
+            --color never \
+            --config 'model_reasoning_effort="high"' \
+            "Do not inspect or modify files. Reply exactly: subscription worker $WORKER_NUMBER passed." \
+            | tee "$RUNNER_TEMP/codex-smoke.jsonl"
+          jq -e --arg expected "subscription worker $WORKER_NUMBER passed." \
+            'select(.type == "item.completed" and .item.type == "agent_message" and .item.text == $expected)' \
+            "$RUNNER_TEMP/codex-smoke.jsonl" >/dev/null
+
+      - name: Persist refreshed subscription auth
+        if: always()
+        working-directory: conductor
+        env:
+          CODEX_CREDENTIAL_REPOSITORY: ${{ github.repository }}
+          CODEX_CREDENTIALS_WRITE_TOKEN: ${{ secrets.CODEX_CREDENTIALS_WRITE_TOKEN }}
+        run: npm run codex:subscription:refresh
+
+  run-conductor:
+    if: github.event_name == 'repository_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine target metadata
+        id: metadata
+        run: |
+          issue_number=$(jq -r '.client_payload.issue_number // empty' "$GITHUB_EVENT_PATH")
+          repository=$(jq -r '.client_payload.repository // empty' "$GITHUB_EVENT_PATH")
+          if [ -z "$issue_number" ] || [ -z "$repository" ]; then
+            echo "Dispatch is missing repository or issue_number." >&2
+            exit 1
+          fi
+          echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.metadata.outputs.repository }}
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ secrets.CONDUCTOR_TOKEN }}
+          path: target
+
+      - name: Checkout Conductor
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CONDUCTOR_REPOSITORY }}
+          ref: ${{ vars.CONDUCTOR_REF || 'main' }}
+          persist-credentials: false
+          path: conductor
+
+      - name: Determine target branch
+        id: branch
+        env:
+          GH_TOKEN: ${{ secrets.CONDUCTOR_TOKEN }}
+          REPOSITORY: ${{ steps.metadata.outputs.repository }}
+          ISSUE_NUMBER: ${{ steps.metadata.outputs.issue_number }}
+        run: |
+          branch=$(gh api "repos/$REPOSITORY/issues/$ISSUE_NUMBER" --jq '.labels[].name | select(startswith("branch:"))' 2>/dev/null | cut -d':' -f2- | xargs || true)
+          if [ -z "$branch" ] || [ "$branch" = "main" ]; then
+            branch="issue-$ISSUE_NUMBER"
+          fi
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Switch target repository to branch
+        working-directory: target
+        env:
+          TARGET_BRANCH: ${{ steps.branch.outputs.branch }}
+        run: git checkout "$TARGET_BRANCH" || git checkout -b "$TARGET_BRANCH"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: conductor/package-lock.json
+
+      - name: Build Conductor
+        working-directory: conductor
+        run: npm ci && npm run build
+
+      - name: Install pinned Codex CLI
+        run: npm install --global "@openai/codex@$CODEX_VERSION"
+
+      - name: Prepare isolated subscription auth
+        working-directory: conductor
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: npm run codex:subscription:prepare
+
+      - name: Verify agent commands cannot read subscription auth
+        working-directory: conductor
+        run: |
+          if codex sandbox --permission-profile conductor-worker --cd "$PWD" -- sh -c "cat '$CODEX_HOME/auth.json'" >/dev/null 2>&1; then
+            echo "Subscription auth was readable inside the agent sandbox." >&2
+            exit 1
+          fi
+          echo "Subscription auth is denied inside the agent sandbox."
+
+      - name: Run Conductor with subscription auth
+        working-directory: conductor
+        env:
+          CONDUCTOR_TOKEN: ${{ secrets.CONDUCTOR_TOKEN }}
+          GH_TOKEN: ${{ secrets.CONDUCTOR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CONDUCTOR_TOKEN }}
+          CONDUCTOR_CODEX_AUTH_MODE: subscription
+          CONDUCTOR_CODEX_MODEL: ${{ vars.CONDUCTOR_CODEX_MODEL || 'gpt-5.6-sol' }}
+          CONDUCTOR_CODEX_EFFORT: ${{ vars.CONDUCTOR_CODEX_EFFORT || 'xhigh' }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_REPOSITORY: ${{ steps.metadata.outputs.repository }}
+          CONDUCTOR_ROOT: ${{ github.workspace }}/conductor
+          CONDUCTOR_TARGET_DIR: ${{ github.workspace }}/target
+        run: npm start
+
+      - name: Persist refreshed subscription auth
+        if: always()
+        working-directory: conductor
+        env:
+          CODEX_CREDENTIAL_REPOSITORY: ${{ github.repository }}
+          CODEX_CREDENTIALS_WRITE_TOKEN: ${{ secrets.CODEX_CREDENTIALS_WRITE_TOKEN }}
+        run: npm run codex:subscription:refresh

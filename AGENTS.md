@@ -5,6 +5,7 @@
 - **Mandatory Helper**: Every E2E test MUST use the `TestStepHelper` for all test steps.
 - **Visual Verification**: Every test step MUST include a visual verification via `toHaveScreenshot()`. This is an ABSOLUTE REQUIREMENT to ensure "Zero-Pixel Tolerance".
 - **Codex CLI Output**: Codex CLI is invoked non-interactively with `codex exec --json`. Conductor parses the JSONL stream and emits `CODEX_EVENT` for observability. Historical `GEMINI_EVENT` logs remain supported by the UI.
+- **Subscription Credentials**: Personal subscription workers must use the generated `conductor-worker` permission profile. Never place `CODEX_HOME` under a writable temporary root or combine subscription auth with `danger-full-access`.
 
 ## Coding Standards
 
