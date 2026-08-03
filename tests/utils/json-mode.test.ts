@@ -19,22 +19,19 @@ describe("JSON mode and Debug intercept", () => {
 		vi.clearAllMocks();
 	});
 
-	it("should intercept GEMINI_EVENT from stdout", async () => {
+	it("should intercept CODEX_EVENT from stdout", async () => {
 		// We'll use sh -c to echo a JSON line
 		const json = JSON.stringify({
-			type: "init",
-			session_id: "123",
-			model: "gemini-pro",
-			timestamp: "2026-04-23T12:00:00Z",
+			type: "thread.started",
+			thread_id: "123",
 		});
 		await runStreamingCommand("sh", ["-c", `echo '${json}'`], process.env);
 
 		expect(logEvent).toHaveBeenCalledWith(
-			"GEMINI_EVENT",
+			"CODEX_EVENT",
 			expect.objectContaining({
-				type: "init",
-				session_id: "123",
-				model: "gemini-pro",
+				type: "thread.started",
+				thread_id: "123",
 			}),
 		);
 		expect(logger.stdout).not.toHaveBeenCalled();
@@ -44,7 +41,7 @@ describe("JSON mode and Debug intercept", () => {
 		await runStreamingCommand("sh", ["-c", "echo 'not json'"], process.env);
 		expect(logger.stdout).toHaveBeenCalledWith("not json\n");
 		expect(logEvent).not.toHaveBeenCalledWith(
-			"GEMINI_EVENT",
+			"CODEX_EVENT",
 			expect.any(Object),
 		);
 
@@ -56,41 +53,9 @@ describe("JSON mode and Debug intercept", () => {
 		);
 		expect(logger.stdout).toHaveBeenCalled();
 		expect(logEvent).not.toHaveBeenCalledWith(
-			"GEMINI_EVENT",
+			"CODEX_EVENT",
 			expect.any(Object),
 		);
-	});
-
-	it("should intercept debug logs from stderr", async () => {
-		await runStreamingCommand(
-			"sh",
-			["-c", 'echo "[Routing] using model X" >&2'],
-			process.env,
-		);
-		expect(logEvent).toHaveBeenCalledWith("LOG_DEBUG", {
-			message: "[Routing] using model X",
-		});
-		expect(logger.stderr).not.toHaveBeenCalled();
-
-		vi.clearAllMocks();
-		await runStreamingCommand(
-			"sh",
-			["-c", 'echo "[Memory] current size" >&2'],
-			process.env,
-		);
-		expect(logEvent).toHaveBeenCalledWith("LOG_DEBUG", {
-			message: "[Memory] current size",
-		});
-
-		vi.clearAllMocks();
-		await runStreamingCommand(
-			"sh",
-			["-c", 'echo "[Status] thinking" >&2'],
-			process.env,
-		);
-		expect(logEvent).toHaveBeenCalledWith("LOG_DEBUG", {
-			message: "[Status] thinking",
-		});
 	});
 
 	it("should fallback to regular stderr for other logs", async () => {

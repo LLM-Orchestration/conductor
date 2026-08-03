@@ -310,6 +310,79 @@ const GeminiEventDataSchema = z.union([
 	RawGeminiEventDataSchema,
 ]);
 
+const CodexItemSchema = z
+	.object({
+		id: z.string(),
+		type: z.string(),
+		status: z.string().optional(),
+	})
+	.passthrough();
+
+const CodexThreadStartedEventSchema = z
+	.object({
+		type: z.literal("thread.started"),
+		thread_id: z.string(),
+	})
+	.passthrough();
+
+const CodexTurnStartedEventSchema = z
+	.object({
+		type: z.literal("turn.started"),
+	})
+	.passthrough();
+
+const CodexItemEventSchema = z
+	.object({
+		type: z.enum(["item.started", "item.updated", "item.completed"]),
+		item: CodexItemSchema,
+	})
+	.passthrough();
+
+const CodexTurnCompletedEventSchema = z
+	.object({
+		type: z.literal("turn.completed"),
+		usage: z
+			.object({
+				input_tokens: z.number().optional(),
+				cached_input_tokens: z.number().optional(),
+				output_tokens: z.number().optional(),
+				reasoning_output_tokens: z.number().optional(),
+			})
+			.passthrough()
+			.optional(),
+	})
+	.passthrough();
+
+const CodexTurnFailedEventSchema = z
+	.object({
+		type: z.literal("turn.failed"),
+		error: z.unknown().optional(),
+	})
+	.passthrough();
+
+const CodexErrorEventSchema = z
+	.object({
+		type: z.literal("error"),
+		message: z.string().optional(),
+	})
+	.passthrough();
+
+const RawCodexEventDataSchema = z
+	.object({
+		type: z.string(),
+	})
+	.passthrough();
+
+const CodexEventDataSchema = z.union([
+	CodexThreadStartedEventSchema,
+	CodexTurnStartedEventSchema,
+	CodexItemEventSchema,
+	CodexTurnCompletedEventSchema,
+	CodexTurnFailedEventSchema,
+	CodexErrorEventSchema,
+	RawCodexEventDataSchema,
+]);
+
 type BaseEvent = {
 	v: number;
 	ts: string;
@@ -320,6 +393,7 @@ type BaseEvent = {
 };
 
 export type GeminiEventData = z.infer<typeof GeminiEventDataSchema>;
+export type CodexEventData = z.infer<typeof CodexEventDataSchema>;
 
 export type ConductorEvent = BaseEvent &
 	(
@@ -344,6 +418,7 @@ export type ConductorEvent = BaseEvent &
 					  };
 		  }
 		| { event: "GEMINI_EVENT"; data: GeminiEventData }
+		| { event: "CODEX_EVENT"; data: CodexEventData }
 		| { event: "TASK"; data: { message: string } }
 		| { event: "LOG_DEBUG_GROUP"; data: { events: ConductorEvent[] } }
 	);
@@ -387,6 +462,10 @@ export const ConductorEventSchema: z.ZodType<ConductorEvent> =
 			data: GeminiEventDataSchema,
 		}),
 		BaseEventSchema.extend({
+			event: z.literal("CODEX_EVENT"),
+			data: CodexEventDataSchema,
+		}),
+		BaseEventSchema.extend({
 			event: z.literal("TASK"),
 			data: z.object({ message: z.string() }),
 		}),
@@ -411,6 +490,9 @@ export function logEvent(
 	let finalData = data;
 	if (event === "GEMINI_EVENT") {
 		const parsed = GeminiEventDataSchema.safeParse(data);
+		if (parsed.success) finalData = parsed.data;
+	} else if (event === "CODEX_EVENT") {
+		const parsed = CodexEventDataSchema.safeParse(data);
 		if (parsed.success) finalData = parsed.data;
 	} else if (event === "session_end") {
 		const parsed = SessionEndDataSchema.safeParse(data);

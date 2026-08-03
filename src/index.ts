@@ -55,7 +55,7 @@ function verifyGitHubCli(repository: string, issueNumber: number): string {
 
 ### ❌ GitHub CLI Preflight Failed
 
-Issue #${issueNumber} could not verify \`gh\` access to \`${repository}\` before invoking Gemini.
+Issue #${issueNumber} could not verify \`gh\` access to \`${repository}\` before invoking Codex.
 
 <details>
 <summary>Preflight output</summary>
@@ -90,7 +90,27 @@ ${failureDetails}
 	return repoCheck.stdout.trim();
 }
 
-function buildGeminiEnv(): NodeJS.ProcessEnv {
+export const DEFAULT_CODEX_MODEL = "gpt-5.6-sol";
+export const DEFAULT_CODEX_EFFORT = "xhigh";
+
+export type CodexReasoningEffort =
+	| "none"
+	| "low"
+	| "medium"
+	| "high"
+	| "xhigh"
+	| "max";
+
+const CodexReasoningEffortSchema = z.enum([
+	"none",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+]);
+
+function buildCodexEnv(): NodeJS.ProcessEnv {
 	const forwardedKeys = [
 		"PATH",
 		"HOME",
@@ -116,10 +136,11 @@ function buildGeminiEnv(): NodeJS.ProcessEnv {
 		"RUNNER_OS",
 		"RUNNER_TEMP",
 		"RUNNER_TOOL_CACHE",
+		"CODEX_HOME",
+		"CODEX_API_KEY",
 		"CONDUCTOR_TOKEN",
 		"GH_TOKEN",
 		"GITHUB_TOKEN",
-		"GEMINI_CLI_TRUST_WORKSPACE",
 	];
 	const env: NodeJS.ProcessEnv = {};
 
@@ -128,353 +149,35 @@ function buildGeminiEnv(): NodeJS.ProcessEnv {
 		if (value) env[key] = value;
 	}
 
-	if (hasGeminiOAuthCredentials()) {
-		return env;
-	}
-
-	if (process.env.GEMINI_API_KEY) {
-		env.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-		return env;
-	}
-
-	if (process.env.GOOGLE_API_KEY) {
-		env.GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
-	}
-
 	return env;
 }
 
-function hasGeminiOAuthCredentials(): boolean {
-	const home = process.env.HOME;
-	if (!home) return false;
-
-	const credsPath = path.join(home, ".gemini", "oauth_creds.json");
-
-	try {
-		const raw = fs.readFileSync(credsPath, "utf8").trim();
-		if (!raw) return false;
-
-		const parsed = JSON.parse(raw);
-		return typeof parsed === "object" && parsed !== null;
-	} catch {
-		return false;
-	}
+export function resolveCodexReasoningEffort(
+	value = process.env.CONDUCTOR_CODEX_EFFORT,
+): CodexReasoningEffort {
+	const parsed = CodexReasoningEffortSchema.safeParse(value);
+	return parsed.success ? parsed.data : DEFAULT_CODEX_EFFORT;
 }
 
-const CODE_ASSIST_ENDPOINT = "https://cloudcode-pa.googleapis.com";
-const CODE_ASSIST_API_VERSION = "v1internal";
-
-export type GeminiCliModel = "auto" | "flash" | "flash-lite" | "pro";
-type GeminiPersona = "conductor" | "coder";
-
-const GeminiOAuthCredentialsSchema = z.object({
-	access_token: z.string().optional(),
-	expiry_date: z.number().optional(),
-	refresh_token: z.string().optional(),
-});
-
-const CodeAssistLoadResponseSchema = z.object({
-	cloudaicompanionProject: z.string().optional(),
-	response: z
-		.object({
-			cloudaicompanionProject: z
-				.object({ id: z.string().optional() })
-				.optional(),
-		})
-		.optional(),
-});
-
-export const GeminiQuotaBucketSchema = z.object({
-	modelId: z.string().optional(),
-	remainingAmount: z.string().optional(),
-	remainingFraction: z.number().optional(),
-	resetTime: z.string().optional(),
-});
-
-const GeminiQuotaResponseSchema = z.object({
-	buckets: z.array(GeminiQuotaBucketSchema).optional(),
-});
-
-type GeminiQuotaBucket = z.infer<typeof GeminiQuotaBucketSchema>;
-type GeminiOAuthClientConfig = { clientId: string; clientSecret: string };
-let cachedGeminiOAuthClientConfig: GeminiOAuthClientConfig | undefined;
-
-function codeAssistMethodUrl(method: string): string {
-	const endpoint = process.env.CODE_ASSIST_ENDPOINT || CODE_ASSIST_ENDPOINT;
-	const version =
-		process.env.CODE_ASSIST_API_VERSION || CODE_ASSIST_API_VERSION;
-	return `${endpoint}/${version}:${method}`;
-}
-
-async function postCodeAssistJson<T>(
-	method: string,
-	accessToken: string,
-	body: unknown,
-): Promise<T> {
-	const response = await fetch(codeAssistMethodUrl(method), {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${accessToken}`,
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify(body),
-	});
-
-	if (!response.ok) {
-		const text = await response.text();
-		throw new Error(
-			`Code Assist ${method} failed with ${response.status}: ${text}`,
-		);
-	}
-
-	return (await response.json()) as T;
-}
-
-async function refreshGeminiOAuthAccessToken(
-	refreshToken: string,
-): Promise<string> {
-	const clientConfig = resolveGeminiOAuthClientConfig();
-	const body = new URLSearchParams({
-		client_id: clientConfig.clientId,
-		client_secret: clientConfig.clientSecret,
-		refresh_token: refreshToken,
-		grant_type: "refresh_token",
-	});
-
-	const response = await fetch("https://oauth2.googleapis.com/token", {
-		method: "POST",
-		body,
-	});
-
-	if (!response.ok) {
-		const text = await response.text();
-		throw new Error(
-			`Gemini OAuth refresh failed with ${response.status}: ${text}`,
-		);
-	}
-
-	const parsed = z
-		.object({ access_token: z.string() })
-		.parse(await response.json());
-	return parsed.access_token;
-}
-
-function resolveGeminiOAuthClientConfig(): GeminiOAuthClientConfig {
-	if (cachedGeminiOAuthClientConfig) return cachedGeminiOAuthClientConfig;
-
-	const script = `
-const fs = require("fs");
-const path = require("path");
-const cp = require("child_process");
-
-const geminiBin = cp.execFileSync("sh", ["-c", "command -v gemini"], { encoding: "utf8" }).trim();
-const geminiEntry = fs.realpathSync(geminiBin);
-const packageRoot = path.dirname(path.dirname(geminiEntry));
-const bundleDir = path.join(packageRoot, "bundle");
-const sources = fs.readdirSync(bundleDir)
-  .filter((file) => file.endsWith(".js"))
-  .map((file) => fs.readFileSync(path.join(bundleDir, file), "utf8"))
-  .join("\\n");
-
-const clientId = sources.match(/OAUTH_CLIENT_ID\\s*=\\s*["']([^"']+)["']/)?.[1];
-const clientSecret = sources.match(/OAUTH_CLIENT_SECRET\\s*=\\s*["']([^"']+)["']/)?.[1];
-
-if (!clientId || !clientSecret) {
-  throw new Error("Unable to locate Gemini CLI OAuth client configuration.");
-}
-
-process.stdout.write(JSON.stringify({ clientId, clientSecret }));
-`;
-
-	const result = spawnSync(
-		"npx",
-		["-y", "-p", "@google/gemini-cli", "node", "-e", script],
-		{
-			encoding: "utf8",
-			env: process.env,
-		},
-	);
-
-	if (result.status !== 0 || !result.stdout.trim()) {
-		throw new Error(
-			`Unable to inspect Gemini CLI OAuth configuration: ${(
-				result.stderr || result.stdout || "No output captured"
-			).trim()}`,
-		);
-	}
-
-	cachedGeminiOAuthClientConfig = z
-		.object({ clientId: z.string(), clientSecret: z.string() })
-		.parse(JSON.parse(result.stdout));
-	return cachedGeminiOAuthClientConfig;
-}
-
-async function getGeminiOAuthAccessToken(): Promise<string | null> {
-	const home = process.env.HOME;
-	if (!home) return null;
-
-	const credsPath = path.join(home, ".gemini", "oauth_creds.json");
-	const raw = fs.readFileSync(credsPath, "utf8");
-	const credentials = GeminiOAuthCredentialsSchema.parse(JSON.parse(raw));
-
-	if (
-		credentials.access_token &&
-		(credentials.expiry_date ?? 0) > Date.now() + 60_000
-	) {
-		return credentials.access_token;
-	}
-
-	if (!credentials.refresh_token) return null;
-	return refreshGeminiOAuthAccessToken(credentials.refresh_token);
-}
-
-async function fetchGeminiQuotaBuckets(): Promise<GeminiQuotaBucket[]> {
-	const accessToken = await getGeminiOAuthAccessToken();
-	if (!accessToken) return [];
-
-	const configuredProject =
-		process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID;
-	const metadata = {
-		ideType: "IDE_UNSPECIFIED",
-		platform: "PLATFORM_UNSPECIFIED",
-		pluginType: "GEMINI",
-		...(configuredProject ? { duetProject: configuredProject } : {}),
-	};
-
-	const loadResponse = CodeAssistLoadResponseSchema.parse(
-		await postCodeAssistJson("loadCodeAssist", accessToken, {
-			cloudaicompanionProject: configuredProject || undefined,
-			metadata,
-		}),
-	);
-
-	const project =
-		loadResponse.cloudaicompanionProject ||
-		loadResponse.response?.cloudaicompanionProject?.id ||
-		configuredProject;
-
-	if (!project) return [];
-
-	const quota = GeminiQuotaResponseSchema.parse(
-		await postCodeAssistJson("retrieveUserQuota", accessToken, { project }),
-	);
-	return quota.buckets ?? [];
-}
-
-function modelBucketMatches(
-	model: Exclude<GeminiCliModel, "auto">,
-	id: string,
-) {
-	if (model === "flash-lite") return id.includes("flash-lite");
-	if (model === "flash")
-		return id.includes("flash") && !id.includes("flash-lite");
-	return id.includes("pro");
-}
-
-function bucketHasQuota(bucket: GeminiQuotaBucket): boolean {
-	if (bucket.remainingAmount !== undefined) {
-		const remaining = Number.parseInt(bucket.remainingAmount, 10);
-		return Number.isFinite(remaining) && remaining > 0;
-	}
-
-	return (bucket.remainingFraction ?? 0) > 0;
-}
-
-export function selectGeminiCliModel(
-	persona: GeminiPersona,
-	buckets: GeminiQuotaBucket[],
-): GeminiCliModel {
-	const models: Exclude<GeminiCliModel, "auto">[] = [
-		"flash",
-		"flash-lite",
-		"pro",
-	];
-	const available = new Map<Exclude<GeminiCliModel, "auto">, boolean>();
-
-	for (const model of models) {
-		const matchingBuckets = buckets.filter(
-			(bucket) => bucket.modelId && modelBucketMatches(model, bucket.modelId),
-		);
-		available.set(
-			model,
-			matchingBuckets.length > 0 && matchingBuckets.some(bucketHasQuota),
-		);
-	}
-
-	const recognizedBuckets = buckets.filter((bucket) =>
-		models.some(
-			(model) => bucket.modelId && modelBucketMatches(model, bucket.modelId),
-		),
-	);
-
-	// Prefer pro if it has enough quota (for all tasks/roles)
-	if (available.get("pro")) {
-		return "pro";
-	}
-
-	const preference: Exclude<GeminiCliModel, "auto">[] =
-		persona === "coder"
-			? ["pro", "flash", "flash-lite"]
-			: ["flash", "flash-lite", "pro"];
-
-	return preference.find((model) => available.get(model)) ?? "auto";
-}
-
-async function resolveGeminiCliModel(
-	persona: GeminiPersona,
-): Promise<GeminiCliModel> {
-	if (!hasGeminiOAuthCredentials()) {
-		logger.info(
-			"Gemini OAuth credentials not found; using Gemini CLI auto model.",
-		);
-		return "auto";
-	}
-
-	try {
-		const buckets = await fetchGeminiQuotaBuckets();
-		if (buckets.length === 0) {
-			logger.info(
-				"Gemini quota buckets unavailable; using Gemini CLI auto model.",
-			);
-			return "auto";
-		}
-
-		const model = selectGeminiCliModel(persona, buckets);
-		if (model === "auto") {
-			logger.info(
-				"All Gemini model quota buckets have remaining quota; using auto model.",
-			);
-		} else {
-			logger.info(`Selected Gemini CLI model '${model}' based on quota.`);
-		}
-		return model;
-	} catch (error) {
-		logger.error(
-			"Failed to inspect Gemini quota; using Gemini CLI auto model.",
-			{
-				error: error instanceof Error ? error.message : String(error),
-			},
-		);
-		return "auto";
-	}
-}
-
-export function buildGeminiCliArgs(
+export function buildCodexCliArgs(
 	prompt: string,
-	model: GeminiCliModel = "auto",
+	model = process.env.CONDUCTOR_CODEX_MODEL || DEFAULT_CODEX_MODEL,
+	effort = resolveCodexReasoningEffort(),
 ): string[] {
 	return [
-		"-y",
-		"@google/gemini-cli",
-		"--debug",
+		"--ask-for-approval",
+		"never",
+		"exec",
+		"--json",
 		"--model",
 		model,
-		"--prompt",
+		"--sandbox",
+		"danger-full-access",
+		"--color",
+		"never",
+		"--config",
+		`model_reasoning_effort=${JSON.stringify(effort)}`,
 		prompt,
-		"--approval-mode",
-		"yolo",
-		"-o",
-		"stream-json",
 	];
 }
 
@@ -881,7 +584,7 @@ async function main() {
 
 		// Extract and download media URLs
 		const mediaUrls = collectAllMediaUrls(issueBody, commentBody);
-		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gemini-media-"));
+		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-media-"));
 		const urlToPath = new Map<string, string>();
 
 		try {
@@ -931,16 +634,6 @@ ACTIVITY SINCE LAST HUMAN COMMENT:
 ${injectedActivity}
 `;
 
-			const geminiApiKey =
-				process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-			if (!geminiApiKey && !hasGeminiOAuthCredentials()) {
-				logger.error(
-					"Gemini auth not set. Configure GEMINI_API_KEY or GEMINI_OAUTH_CREDS_JSON in GitHub Actions, " +
-						"or authenticate locally so ~/.gemini/oauth_creds.json exists.",
-				);
-				process.exit(1);
-			}
-
 			const verifiedRepo = verifyGitHubCli(repository, issueNumber);
 			logger.info(`Verified GitHub CLI access to ${verifiedRepo}`);
 
@@ -953,8 +646,13 @@ ENVIRONMENT:
 - GitHub CLI repository access has been preflight-verified for ${verifiedRepo}.
 - If a gh command fails, report the exact command and stderr instead of inferring an authentication problem.`;
 
-			logger.info("Invoking Gemini CLI...");
-			const childEnv = buildGeminiEnv();
+			const codexModel =
+				process.env.CONDUCTOR_CODEX_MODEL || DEFAULT_CODEX_MODEL;
+			const codexEffort = resolveCodexReasoningEffort();
+			logger.info(
+				`Invoking Codex CLI with model '${codexModel}' and effort '${codexEffort}'...`,
+			);
+			const childEnv = buildCodexEnv();
 			childEnv.CONDUCTOR_PERSONA = persona;
 			childEnv.CONDUCTOR_LAST_COMMENT_URL = lastCommentUrl;
 			childEnv.CONDUCTOR_ROOT = conductorRoot;
@@ -966,19 +664,18 @@ ENVIRONMENT:
 				path.resolve(process.cwd(), "..");
 			childEnv.CONDUCTOR_TARGET_DIR = targetCwd;
 
-			const geminiModel = await resolveGeminiCliModel(persona);
-			// Invoke the official CLI package in headless mode so Actions does not depend on a preinstalled binary.
-			const args = buildGeminiCliArgs(prompt, geminiModel);
+			const args = buildCodexCliArgs(prompt, codexModel, codexEffort);
 
 			const result = await runStreamingCommand(
-				"npx",
+				"codex",
 				args,
 				childEnv,
 				targetCwd,
+				"CODEX_EVENT",
 			);
 
 			if (result.status !== 0) {
-				logger.error("Gemini CLI execution failed");
+				logger.error("Codex CLI execution failed");
 
 				const errorOutput = (
 					result.stderr ||
@@ -991,7 +688,7 @@ ENVIRONMENT:
 
 				const body = `I am the **automation**
 
-### ❌ Gemini CLI Execution Failed
+### ❌ Codex CLI Execution Failed
 
 **Exit Code**: ${result.status}
 

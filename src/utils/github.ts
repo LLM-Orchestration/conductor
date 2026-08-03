@@ -133,7 +133,7 @@ export function injectMediaPaths(
 	for (const [url, localPath] of urlToPath.entries()) {
 		const escapedUrl = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const regex = new RegExp(escapedUrl, "g");
-		// Using a marker that is less likely to break HTML attributes if Gemini repeats it,
+		// Using a marker that is less likely to break HTML attributes if an agent repeats it,
 		// but primarily so we can strip it before posting back to GitHub.
 		updatedText = updatedText.replace(
 			regex,

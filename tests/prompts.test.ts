@@ -3,93 +3,74 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	buildGeminiCliArgs,
+	buildCodexCliArgs,
+	DEFAULT_CODEX_EFFORT,
+	DEFAULT_CODEX_MODEL,
 	loadPrompts,
-	selectGeminiCliModel,
+	resolveCodexReasoningEffort,
 } from "../src/index";
 
-describe("buildGeminiCliArgs", () => {
-	it("runs Gemini CLI in auto model mode with stream-json output", () => {
-		expect(buildGeminiCliArgs("test prompt")).toEqual([
-			"-y",
-			"@google/gemini-cli",
-			"--debug",
+describe("buildCodexCliArgs", () => {
+	it("runs Codex CLI non-interactively with JSONL output", () => {
+		expect(buildCodexCliArgs("test prompt")).toEqual([
+			"--ask-for-approval",
+			"never",
+			"exec",
+			"--json",
 			"--model",
-			"auto",
-			"--prompt",
+			DEFAULT_CODEX_MODEL,
+			"--sandbox",
+			"danger-full-access",
+			"--color",
+			"never",
+			"--config",
+			`model_reasoning_effort=${JSON.stringify(DEFAULT_CODEX_EFFORT)}`,
 			"test prompt",
-			"--approval-mode",
-			"yolo",
-			"-o",
-			"stream-json",
 		]);
 	});
 
-	it("can pin Gemini CLI to an explicit model", () => {
-		expect(buildGeminiCliArgs("test prompt", "pro")).toContain("pro");
+	it("can pin the model and reasoning effort", () => {
+		expect(buildCodexCliArgs("test prompt", "custom-model", "high")).toContain(
+			"custom-model",
+		);
+		expect(buildCodexCliArgs("test prompt", "custom-model", "high")).toContain(
+			'model_reasoning_effort="high"',
+		);
 	});
 });
 
-describe("selectGeminiCliModel", () => {
-	it("prefers pro when all model families have quota remaining", () => {
-		expect(
-			selectGeminiCliModel("coder", [
-				{ modelId: "gemini-2.5-flash", remainingFraction: 0.1 },
-				{ modelId: "gemini-2.5-flash-lite", remainingFraction: 0.1 },
-				{ modelId: "gemini-2.5-pro", remainingFraction: 0.1 },
-			]),
-		).toBe("pro");
+describe("resolveCodexReasoningEffort", () => {
+	it("accepts supported effort values", () => {
+		expect(resolveCodexReasoningEffort("none")).toBe("none");
+		expect(resolveCodexReasoningEffort("max")).toBe("max");
 	});
 
-	it("prefers pro for conductor when available", () => {
-		expect(
-			selectGeminiCliModel("conductor", [
-				{ modelId: "gemini-2.5-flash", remainingFraction: 0.1 },
-				{ modelId: "gemini-2.5-flash-lite", remainingFraction: 0 },
-				{ modelId: "gemini-2.5-pro", remainingFraction: 0.1 },
-			]),
-		).toBe("pro");
+	it("falls back when the configured effort is invalid", () => {
+		expect(resolveCodexReasoningEffort("impossible")).toBe(
+			DEFAULT_CODEX_EFFORT,
+		);
+	});
+});
+
+describe("Conductor workflow", () => {
+	const workflow = fs.readFileSync(
+		path.join(process.cwd(), ".github", "workflows", "conductor.yml"),
+		"utf8",
+	);
+
+	it("boots the pinned Codex CLI with the official action", () => {
+		expect(workflow).toContain("uses: openai/codex-action@v1");
+		expect(workflow).toContain(
+			"openai-api-key: $" + "{{ secrets.OPENAI_API_KEY }}",
+		);
+		expect(workflow).toContain('codex-version: "0.146.0"');
 	});
 
-	it("prefers flash for conductor when pro is exhausted", () => {
-		expect(
-			selectGeminiCliModel("conductor", [
-				{ modelId: "gemini-2.5-flash", remainingFraction: 0.1 },
-				{ modelId: "gemini-2.5-flash-lite", remainingFraction: 0.1 },
-				{ modelId: "gemini-2.5-pro", remainingFraction: 0 },
-			]),
-		).toBe("flash");
-	});
-
-	it("pins a model when any returned model bucket is exhausted", () => {
-		expect(
-			selectGeminiCliModel("coder", [
-				{ modelId: "gemini-2.5-flash", remainingFraction: 0.1 },
-				{ modelId: "gemini-3-flash-preview", remainingFraction: 0 },
-				{ modelId: "gemini-2.5-flash-lite", remainingFraction: 0.1 },
-				{ modelId: "gemini-2.5-pro", remainingFraction: 0.1 },
-			]),
-		).toBe("pro");
-	});
-
-	it("prefers pro for coder when flash is exhausted", () => {
-		expect(
-			selectGeminiCliModel("coder", [
-				{ modelId: "gemini-2.5-flash", remainingFraction: 0 },
-				{ modelId: "gemini-2.5-flash-lite", remainingFraction: 0.1 },
-				{ modelId: "gemini-2.5-pro", remainingFraction: 0.1 },
-			]),
-		).toBe("pro");
-	});
-
-	it("falls back to an available model when the persona preference is exhausted", () => {
-		expect(
-			selectGeminiCliModel("coder", [
-				{ modelId: "gemini-2.5-flash", remainingFraction: 0 },
-				{ modelId: "gemini-2.5-flash-lite", remainingFraction: 0.5 },
-				{ modelId: "gemini-2.5-pro", remainingFraction: 0 },
-			]),
-		).toBe("flash-lite");
+	it("configures the Codex model without Gemini credentials", () => {
+		expect(workflow).toContain("CONDUCTOR_CODEX_MODEL:");
+		expect(workflow).toContain("CONDUCTOR_CODEX_EFFORT:");
+		expect(workflow).not.toContain("GEMINI_API_KEY");
+		expect(workflow).not.toContain("GEMINI_OAUTH_CREDENTIALS");
 	});
 });
 

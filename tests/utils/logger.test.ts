@@ -232,4 +232,54 @@ describe("logger", () => {
 		expect(payload.data.stats.tool_calls).toBe(12);
 		expect(payload.data._isMessageBus).toBe(false);
 	});
+
+	it("should preserve Codex thread events", () => {
+		logEvent("CODEX_EVENT", {
+			type: "thread.started",
+			thread_id: "thread-123",
+		});
+
+		const output = stdoutSpy.mock.calls[0][0] as string;
+		const payload = JSON.parse(output.split("::CONDUCTOR_EVENT::")[1]);
+
+		expect(payload.event).toBe("CODEX_EVENT");
+		expect(payload.data).toEqual({
+			type: "thread.started",
+			thread_id: "thread-123",
+		});
+	});
+
+	it("should preserve Codex item and usage details", () => {
+		logEvent("CODEX_EVENT", {
+			type: "item.completed",
+			item: {
+				id: "item-1",
+				type: "command_execution",
+				status: "completed",
+				command: "npm test",
+				exit_code: 0,
+			},
+		});
+		logEvent("CODEX_EVENT", {
+			type: "turn.completed",
+			usage: {
+				input_tokens: 100,
+				cached_input_tokens: 80,
+				output_tokens: 20,
+				reasoning_output_tokens: 10,
+			},
+		});
+
+		const itemPayload = JSON.parse(
+			(stdoutSpy.mock.calls[0][0] as string).split("::CONDUCTOR_EVENT::")[1],
+		);
+		const turnPayload = JSON.parse(
+			(stdoutSpy.mock.calls[1][0] as string).split("::CONDUCTOR_EVENT::")[1],
+		);
+
+		expect(itemPayload.data.item.command).toBe("npm test");
+		expect(itemPayload.data.item.exit_code).toBe(0);
+		expect(turnPayload.data.usage.cached_input_tokens).toBe(80);
+		expect(turnPayload.data.usage.reasoning_output_tokens).toBe(10);
+	});
 });

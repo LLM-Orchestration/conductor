@@ -21,7 +21,7 @@ describe("isPersonaComment", () => {
 	it("identifies automation comments", () => {
 		expect(
 			isPersonaComment(
-				"I am the **automation**\n\n### ❌ Gemini CLI Execution Failed",
+				"I am the **automation**\n\n### ❌ Codex CLI Execution Failed",
 			),
 		).toBe(true);
 	});

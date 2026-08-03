@@ -4,7 +4,7 @@ Conductor is an LLM coordination framework designed to facilitate complex softwa
 
 ## Philosophy
 
-Conductor aims for extreme simplicity and high agency. Instead of complex, hardcoded JSON protocols and rigid guardrails, Conductor leverages existing powerful coding agents (like Gemini CLI) and integrates them into a standard software development lifecycle using GitHub Actions and Issues.
+Conductor aims for extreme simplicity and high agency. Instead of complex, hardcoded JSON protocols and rigid guardrails, Conductor leverages Codex CLI and integrates it into a standard software development lifecycle using GitHub Actions and Issues.
 
 ## Key Features
 
@@ -16,16 +16,16 @@ Conductor aims for extreme simplicity and high agency. Instead of complex, hardc
 - **Rigorous E2E Standards**: Zero-pixel tolerance and deterministic Playwright testing using a Unified Step Pattern (see [E2E_GUIDE.md](E2E_GUIDE.md)).
 - **Agent Agnostic**: Supports any CLI-based agent that can interact with a codebase.
 
-## Gemini Setup
+## Codex Setup
 
-This MVP invokes the official Gemini CLI through `npx` in headless mode. We utilize `-o stream-json` for high-fidelity tool tracking and real-time observability.
+Conductor invokes Codex CLI non-interactively with `codex exec --json`. The JSONL event stream is recorded as `CODEX_EVENT` data for real-time observability. The default model is `gpt-5.6-sol` with `xhigh` reasoning effort.
 
-- For GitHub Actions, set either:
-  - `GEMINI_OAUTH_CREDS_JSON` to the full contents of `~/.gemini/oauth_creds.json`
-  - or `GEMINI_API_KEY` as a fallback
-- The Conductor workflow also sets `GEMINI_CLI_TRUST_WORKSPACE=true` so Gemini CLI can run non-interactively in the checked-out target repository.
-- The conductor workflow pre-seeds `~/.gemini/projects.json` on the runner to avoid the upstream `ProjectRegistry.save()` bootstrap race on fresh environments.
-- For local runs, either authenticate Gemini CLI so `~/.gemini/oauth_creds.json` exists, or copy `.env.example` to `.env` and set `GEMINI_API_KEY`.
+- For GitHub Actions, add an `OPENAI_API_KEY` repository secret. The official `openai/codex-action` installs the pinned CLI and exposes the key through its Responses API proxy before Conductor starts.
+- Override the defaults with repository variables `CONDUCTOR_CODEX_MODEL` and `CONDUCTOR_CODEX_EFFORT` when needed.
+- For local runs, install Codex CLI, run `codex login`, and optionally copy `.env.example` to `.env` to override model or effort.
+- Conductor uses `danger-full-access` with approvals disabled because each turn already runs in a disposable GitHub-hosted VM and must use Git, GitHub CLI, and repository verification tools non-interactively.
+
+The workflow pins Codex CLI `0.146.0`. Upgrade that version deliberately alongside invocation and JSONL fixture tests. Historical `GEMINI_EVENT` records remain renderable in the observability UI so old workflow runs do not disappear.
 
 ## Projects V2 Setup
 

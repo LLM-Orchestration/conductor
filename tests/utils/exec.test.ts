@@ -95,49 +95,48 @@ describe("exec utility", () => {
 			);
 		});
 
-		it("should intercept MESSAGE_BUS messages in stderr and add _isMessageBus flag", async () => {
+		it("should emit Codex JSONL events from stdout", async () => {
 			const logEventSpy = vi.spyOn(loggerModule, "logEvent");
-			const msg =
-				'[MESSAGE_BUS] publish: {"type":"tool-calls-update","toolCalls":[],"schedulerId":"root"}';
+			const msg = '{"type":"thread.started","thread_id":"thread-123"}';
 			const result = await runStreamingCommand(
 				"sh",
-				["-c", `echo '${msg}' >&2`],
+				["-c", `echo '${msg}'`],
 				process.env,
 			);
 
 			expect(result.status).toBe(0);
-			expect(logEventSpy).toHaveBeenCalledWith("GEMINI_EVENT", {
-				type: "tool-calls-update",
-				toolCalls: [],
-				schedulerId: "root",
-				_isMessageBus: true,
+			expect(logEventSpy).toHaveBeenCalledWith("CODEX_EVENT", {
+				type: "thread.started",
+				thread_id: "thread-123",
 			});
-			// It should NOT have been logged to stderr (terminal log)
-			expect(logEventSpy).not.toHaveBeenCalledWith("STDERR", expect.anything());
+			expect(logEventSpy).not.toHaveBeenCalledWith("STDOUT", expect.anything());
 		});
 
-		it("should handle MESSAGE_BUS messages with ANSI colors and prefixes", async () => {
+		it("should allow callers to identify historical Gemini streams", async () => {
 			const logEventSpy = vi.spyOn(loggerModule, "logEvent");
-			// Simulated message with ANSI colors and a prefix
-			const msg =
-				'\x1b[34mDEBUG\x1b[0m [21:05:22] [MESSAGE_BUS] publish: {"type":"test-message"}';
+			const msg = '{"type":"message","role":"assistant","content":"hi"}';
 			const result = await runStreamingCommand(
 				"sh",
-				["-c", `echo '${msg}' >&2`],
+				["-c", `echo '${msg}'`],
 				process.env,
+				undefined,
+				"GEMINI_EVENT",
 			);
 
 			expect(result.status).toBe(0);
 			expect(logEventSpy).toHaveBeenCalledWith("GEMINI_EVENT", {
-				type: "test-message",
-				_isMessageBus: true,
+				type: "message",
+				role: "assistant",
+				content: "hi",
 			});
-			expect(logEventSpy).not.toHaveBeenCalledWith("STDERR", expect.anything());
 		});
 
-		it("should intercept any JSON event in stderr with a type field", async () => {
+		it("should preserve stderr instead of interpreting it as JSONL", async () => {
 			const logEventSpy = vi.spyOn(loggerModule, "logEvent");
-			const msg = 'SOME_PREFIX {"type":"call","method":"test","args":{}}';
+			const stderrSpy = vi.spyOn(loggerModule.logger, "stderr");
+			logEventSpy.mockClear();
+			stderrSpy.mockClear();
+			const msg = '{"type":"error","message":"diagnostic"}';
 			const result = await runStreamingCommand(
 				"sh",
 				["-c", `echo '${msg}' >&2`],
@@ -145,12 +144,11 @@ describe("exec utility", () => {
 			);
 
 			expect(result.status).toBe(0);
-			expect(logEventSpy).toHaveBeenCalledWith("GEMINI_EVENT", {
-				type: "call",
-				method: "test",
-				args: {},
-			});
-			expect(logEventSpy).not.toHaveBeenCalledWith("STDERR", expect.anything());
+			expect(logEventSpy).not.toHaveBeenCalledWith(
+				"CODEX_EVENT",
+				expect.anything(),
+			);
+			expect(stderrSpy).toHaveBeenCalledWith(`[stderr] ${msg}\n`);
 		});
 	});
 });

@@ -9,7 +9,6 @@
 		"firebase:deploy": "npx --yes firebase-tools deploy --only functions",
 		"firebase:serve": "npx --yes firebase-tools emulators:start --only functions",
 		"functions:check": "node -c functions/index.js && tsc -p functions/tsconfig.json",
-		"gemini:prepare-auth": "bash ./scripts/prepare-gemini-auth.sh",
 		"human-review": "bash ./scripts/move-to-human-review.sh",
 		"recover:orphans": "node dist/recover-orphans.js",
 		"recover:orphans:dry-run": "node dist/recover-orphans.js --dry-run",

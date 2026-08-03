@@ -147,6 +147,7 @@ strip_local_media_markers() {
   sed \
     -e 's/ <!-- CONDUCTOR_MEDIA_PATH: [^>]* -->//g' \
     -e 's/ @\/tmp\/gemini-media-[^ ]*//g' \
+    -e 's/ @\/tmp\/codex-media-[^ ]*//g' \
     "$body_file" > "$tmp_file"
   mv "$tmp_file" "$body_file"
 }

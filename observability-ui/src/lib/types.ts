@@ -2,6 +2,36 @@ import type { ConductorEvent } from "../../../src/utils/logger";
 
 export type { ConductorEvent };
 
+export interface CodexUsage {
+	input_tokens?: number;
+	cached_input_tokens?: number;
+	output_tokens?: number;
+	reasoning_output_tokens?: number;
+	[key: string]: unknown;
+}
+
+export interface CodexItem {
+	id: string;
+	type: string;
+	status?: string;
+	text?: string;
+	command?: string;
+	aggregated_output?: string;
+	exit_code?: number;
+	changes?: Array<Record<string, unknown>>;
+	[key: string]: unknown;
+}
+
+export interface CodexEventData {
+	type: string;
+	thread_id?: string;
+	item?: CodexItem;
+	usage?: CodexUsage;
+	error?: unknown;
+	message?: string;
+	[key: string]: unknown;
+}
+
 export interface GeminiStats {
 	total_tokens?: number;
 	input_tokens?: number;

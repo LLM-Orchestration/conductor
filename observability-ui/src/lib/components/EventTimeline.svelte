@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { ConductorEvent, GeminiEventData } from "../types";
+import CodexEvent from "./CodexEvent.svelte";
 import GeminiEvent from "./GeminiEvent.svelte";
 
 let { events = [] }: { events: ConductorEvent[] } = $props();
@@ -204,6 +205,8 @@ function getMessage(event: ConductorEvent): string {
                   <div class="nested-debug-event">
                     {#if debugEvent.event === 'GEMINI_EVENT'}
                       <GeminiEvent event={debugEvent} {toolNameMap} />
+                    {:else if debugEvent.event === 'CODEX_EVENT'}
+                      <CodexEvent event={debugEvent} />
                     {:else}
                       <div class="nested-header">
                         <span class="timestamp">{formatTimestamp(debugEvent.ts)}</span>
@@ -252,6 +255,8 @@ function getMessage(event: ConductorEvent): string {
           </div>
         {:else if event.event === 'GEMINI_EVENT'}
           <GeminiEvent {event} {toolNameMap} />
+        {:else if event.event === 'CODEX_EVENT'}
+          <CodexEvent {event} />
         {:else}
           <div class="event-card">
             <div class="event-header">

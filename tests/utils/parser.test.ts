@@ -94,4 +94,20 @@ some other log
 		expect(events[2].data.response).toBeUndefined();
 		expect(events[2].data.stats.cached).toBe(138120);
 	});
+
+	it("should parse current Codex JSONL event shapes", () => {
+		const logs = `
+::CONDUCTOR_EVENT::{"v":1,"ts":"2026-08-03T12:00:00.000Z","event":"CODEX_EVENT","data":{"type":"thread.started","thread_id":"thread-123"}}
+::CONDUCTOR_EVENT::{"v":1,"ts":"2026-08-03T12:00:01.000Z","event":"CODEX_EVENT","data":{"type":"item.completed","item":{"id":"item-1","type":"agent_message","text":"Implemented the change."}}}
+::CONDUCTOR_EVENT::{"v":1,"ts":"2026-08-03T12:00:02.000Z","event":"CODEX_EVENT","data":{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":80,"output_tokens":20,"reasoning_output_tokens":10}}}
+    `;
+
+		const events = parseLogs(logs);
+
+		expect(events).toHaveLength(3);
+		expect(events[0].event).toBe("CODEX_EVENT");
+		expect(events[0].data.thread_id).toBe("thread-123");
+		expect(events[1].data.item.text).toBe("Implemented the change.");
+		expect(events[2].data.usage.cached_input_tokens).toBe(80);
+	});
 });

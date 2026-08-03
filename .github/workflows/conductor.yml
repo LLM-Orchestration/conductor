@@ -22,8 +22,8 @@ jobs:
         run: |
           ISSUE_NUMBER=$(jq -r '.client_payload.issue_number // empty' "$GITHUB_EVENT_PATH")
           REPO=$(jq -r '.client_payload.repository // "${{ github.repository }}"' "$GITHUB_EVENT_PATH")
-          echo "issue_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
-          echo "repository=$REPO" >> $GITHUB_OUTPUT
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "repository=$REPO" >> "$GITHUB_OUTPUT"
           echo "Target Repo: $REPO, Issue: $ISSUE_NUMBER"
 
       - name: Checkout Target Repo
@@ -53,7 +53,7 @@ jobs:
           if [ -z "$BRANCH" ] || [ "$BRANCH" = "main" ]; then
             BRANCH="issue-$ISSUE_NUMBER"
           fi
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           echo "Selected branch: $BRANCH"
 
       - name: Switch Target Repo to Branch
@@ -71,18 +71,18 @@ jobs:
 
       - name: Install Dependencies
         working-directory: conductor
-        run: npm install
+        run: npm ci
 
       - name: Build
         working-directory: conductor
         run: npm run build
 
-      - name: Prepare Gemini Auth
-        working-directory: conductor
-        env:
-          GEMINI_API_KEY_SECRET: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_OAUTH_CREDS_JSON: ${{ secrets.GEMINI_OAUTH_CREDS_JSON }}
-        run: npm run gemini:prepare-auth
+      - name: Prepare Codex CLI and API proxy
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          codex-version: "0.146.0"
+          safety-strategy: drop-sudo
 
       - name: Run Conductor
         working-directory: conductor
@@ -90,7 +90,8 @@ jobs:
           CONDUCTOR_TOKEN: ${{ secrets.CONDUCTOR_TOKEN }}
           GH_TOKEN: ${{ secrets.CONDUCTOR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.CONDUCTOR_TOKEN }}
-          GEMINI_CLI_TRUST_WORKSPACE: "true"
+          CONDUCTOR_CODEX_MODEL: ${{ vars.CONDUCTOR_CODEX_MODEL || 'gpt-5.6-sol' }}
+          CONDUCTOR_CODEX_EFFORT: ${{ vars.CONDUCTOR_CODEX_EFFORT || 'xhigh' }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
           GITHUB_REPOSITORY: ${{ steps.metadata.outputs.repository }}
           CONDUCTOR_ROOT: ${{ github.workspace }}/conductor

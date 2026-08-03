@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { logEvent, logger } from "./logger";
 
+export type StructuredAgentEvent = "CODEX_EVENT" | "GEMINI_EVENT";
+
 export interface CommandResult {
 	status: number;
 	stdout: string;
@@ -50,6 +52,7 @@ export async function runStreamingCommand(
 	args: string[],
 	env: NodeJS.ProcessEnv,
 	cwd?: string,
+	structuredEvent: StructuredAgentEvent = "CODEX_EVENT",
 ): Promise<CommandResult> {
 	return await new Promise((resolve, reject) => {
 		const child = spawn(command, args, {
@@ -69,7 +72,7 @@ export async function runStreamingCommand(
 				try {
 					const parsed = JSON.parse(trimmed);
 					if (parsed && typeof parsed === "object" && "type" in parsed) {
-						logEvent("GEMINI_EVENT", parsed);
+						logEvent(structuredEvent, parsed);
 						return;
 					}
 				} catch (_e) {
@@ -81,40 +84,6 @@ export async function runStreamingCommand(
 		});
 		const stderrForwarder = createLineForwarder("stderr", (formatted, raw) => {
 			stderr += raw;
-
-			// Robust JSON extraction from any line (including those with prefixes or ANSI codes)
-			const jsonMatch = raw.match(/(\{.*\})/);
-			if (jsonMatch) {
-				try {
-					const parsed = JSON.parse(jsonMatch[1]);
-					if (parsed && typeof parsed === "object" && "type" in parsed) {
-						if (raw.includes("[MESSAGE_BUS]")) {
-							parsed._isMessageBus = true;
-						}
-						logEvent("GEMINI_EVENT", parsed);
-						return;
-					}
-				} catch (_e) {
-					// Not valid JSON or missing type, fallback
-				}
-			}
-
-			const ANSI_REGEX =
-				// biome-ignore lint/suspicious/noControlCharactersInRegex: intended for ANSI escape codes
-				/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
-			const cleanRaw = raw.replace(ANSI_REGEX, "");
-			const trimmed = cleanRaw.trim();
-
-			// Intercept debug logs from Gemini CLI
-			if (
-				trimmed.includes("[Routing]") ||
-				trimmed.includes("[Memory]") ||
-				trimmed.includes("[Status]")
-			) {
-				logEvent("LOG_DEBUG", { message: trimmed });
-				return;
-			}
-
 			logger.stderr(formatted);
 		});
 
